@@ -1709,5 +1709,104 @@
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
-.settings-billing-subscription { display: grid; gap: 10px; }
-.settings-billing-windows { display: grid; gap: 5px; color: var(--text-secondary); font-size: 12px; line-height: 1.45; }
+
+.settings-billing-subscription {
+  display: grid;
+  gap: var(--space-6);
+  padding: var(--space-4);
+}
+
+.settings-billing-header,
+.settings-billing-window > div,
+.settings-billing-models dl > div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.settings-billing-header {
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.settings-billing-plan {
+  display: grid;
+  gap: var(--space-1);
+  overflow-wrap: anywhere;
+}
+
+.settings-billing-header .settings-billing-plan h2 {
+  font-size: var(--text-xl);
+  line-height: 1.2;
+}
+
+.settings-billing-plan > span,
+.settings-billing-window > span:not(.ui-progress),
+.settings-billing-models > span {
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+}
+
+.settings-billing-windows {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 13rem), 1fr));
+  gap: var(--space-2);
+}
+
+.settings-billing-window {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.settings-billing-window .ui-progress span {
+  background: var(--color-accent);
+}
+
+.settings-billing-window.is-exhausted .ui-progress span {
+  background: var(--color-danger);
+}
+
+.settings-billing-window strong,
+.settings-billing-models dd {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.settings-billing-window h3,
+.settings-billing-models h3 {
+  margin: 0;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+}
+
+.settings-billing-models dl {
+  margin: var(--space-2) 0 0;
+}
+
+.settings-billing-models dl > div {
+  padding-block: var(--space-2);
+  border-top: 1px solid var(--color-border);
+  font-size: var(--text-sm);
+}
+
+.settings-billing-models dt {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.settings-billing-models dd {
+  margin: 0;
+  color: var(--color-text-secondary);
+}
+
+.settings-billing-dashboard {
+  flex-wrap: wrap;
+}
+
+.settings-billing-dashboard .settings-row-text {
+  flex-basis: 12rem;
+}

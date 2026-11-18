@@ -1,5 +1,5 @@
 import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
-import { Cloud, ExternalLink, Globe2, MessageCircle } from "./icons.js";
+import { Cloud, ExternalLink, Globe2, MessageCircle, RefreshCw } from "./icons.js";
 import githubMark from "@lobehub/icons-static-svg/icons/github.svg";
 import { useAuth } from "./auth.js";
 import { ModelsSettings, type ModelsView } from "./models-settings.js";
@@ -21,7 +21,7 @@ import { WebSearchSettingsPanel } from "./web-search-settings.js";
 import { NetworkSettingsPanel } from "./network-settings.js";
 import { ExternalAgentsSettings } from "./external-agents-settings.js";
 import { readNotificationSettings, setNotificationSettings, useNotificationPermission, type NotificationSettings as NotificationPreferences } from "./agent-notifications.js";
-import { readLanguagePreference, setLanguagePreference, t, type LanguagePreference } from "./i18n.js";
+import { language, readLanguagePreference, setLanguagePreference, t, type LanguagePreference } from "./i18n.js";
 import { ChangelogPanel } from "./changelog-panel.js";
 import { exportDiagnostics, getCloudSubscription, getProjectLocation, listPluginThemes, setProjectLocation } from "./api.js";
 import type { CloudSubscriptionSnapshot } from "../shared/cloud-models.js";
@@ -34,6 +34,8 @@ import "./settings.css";
 import { readUsageDataEnabled, setUsageDataEnabled } from "./analytics.js";
 
 const BILLING_DASHBOARD_URL = "https://account.ohmygame.ai/account/billing";
+const billingDate = new Intl.DateTimeFormat(language, { dateStyle: "medium", timeStyle: "short" });
+const billingPercent = new Intl.NumberFormat(language, { style: "percent", maximumFractionDigits: 1 });
 const LANGUAGE_OPTIONS: readonly { value: LanguagePreference; label: string }[] = [
   { value: "system", label: t("settings.appearance.system") },
   // Language names stay in their own language so people can find theirs.
@@ -432,40 +434,73 @@ function BillingSubscription({ userId, link }: { userId?: string; link: ReturnTy
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
   }, [userId, refresh]);
+  const plan = subscription?.window_subscription;
   return (
-    <>
-      <SettingsGroup>
-        {failed ? <SettingsNote tone="danger">{t("settings.billing.unavailable")}</SettingsNote> :
-          <CloudSubscriptionCard subscription={subscription} loading={loading} />}
-        {userId ? <Button size="sm" disabled={loading} onClick={() => setRefresh((value) => value + 1)}>{t("common.refresh")}</Button> : null}
-      </SettingsGroup>
-      <SettingsGroup>
-      <SettingsRow title={t("settings.billing.title")} description={t("settings.billing.description")}>
-        <Button icon={<ExternalLink size={14} />} onClick={() => void link.open(BILLING_DASHBOARD_URL)}>{t("settings.billing.open")}</Button>
+    <SettingsGroup label={t("settings.billing.membership")}>
+      <div className="settings-billing-subscription">
+        <header className="settings-billing-header">
+          <div className="settings-billing-plan">
+            <span>{t("settings.billing.membership")}</span>
+            <h2 aria-live="polite">
+              {loading && !subscription ? t("common.loading")
+                : failed && !subscription ? t("settings.billing.unavailable")
+                  : plan?.plan_title ?? t("settings.billing.noPlan")}
+            </h2>
+            {plan?.active && plan.expires_at ? (
+              <span>{t("settings.billing.expiresAt", { date: billingDate.format(plan.expires_at * 1_000) })}</span>
+            ) : null}
+          </div>
+          {userId ? (
+            <Button size="sm" variant="ghost" icon={<RefreshCw size={14} />} disabled={loading}
+              onClick={() => setRefresh((value) => value + 1)}>
+              {t("common.refresh")}
+            </Button>
+          ) : null}
+        </header>
+        {failed && subscription ? <SettingsNote tone="danger">{t("settings.billing.refreshFailed")}</SettingsNote> : null}
+        {plan?.active ? <CloudSubscriptionUsage plan={plan} /> : null}
+      </div>
+      <SettingsRow className="settings-billing-dashboard" title={t("settings.billing.manage")} description={t("settings.billing.description")}>
+        <Button size="sm" icon={<ExternalLink size={14} />} onClick={() => void link.open(BILLING_DASHBOARD_URL)}>{t("settings.billing.open")}</Button>
       </SettingsRow>
       <ExternalLinkFallback url={link.failedUrl} />
-      </SettingsGroup>
-    </>
+    </SettingsGroup>
   );
 }
 
-function CloudSubscriptionCard({ subscription, loading }: { subscription?: CloudSubscriptionSnapshot | null; loading: boolean }) {
-  const windowSubscription = subscription?.window_subscription;
-  const formatDate = (seconds?: number) => seconds ? new Date(seconds * 1_000).toLocaleString() : t("settings.billing.unavailable");
-  const windowLine = (label: string, value?: { used_percent: number; resets_at: number; exhausted: boolean }) => value
-    ? `${label}: ${value.used_percent.toFixed(1)}% · ${value.exhausted ? t("settings.billing.unavailable") : formatDate(value.resets_at)}`
-    : `${label}: ${t("settings.billing.unavailable")}`;
-  return <div className="settings-billing-subscription">
-    <div className="settings-identity-text">
-      <strong>{loading ? t("common.loading") : windowSubscription?.plan_title ?? t("settings.billing.noPlan")}</strong>
-      <span>{t("settings.billing.membership")} · {t("settings.billing.expires")} {formatDate(windowSubscription?.expires_at)}</span>
-    </div>
-    <div className="settings-billing-windows">
-      <span>{windowLine(t("settings.billing.fiveHour"), windowSubscription?.five_hour)}</span>
-      <span>{windowLine(t("settings.billing.weekly"), windowSubscription?.weekly)}</span>
-      <span>{t("settings.billing.models")}: {windowSubscription?.models.map((model) => `${model.id} ×${model.multiplier}`).join(", ") || t("settings.billing.unavailable")}</span>
-    </div>
-  </div>;
+function CloudSubscriptionUsage({ plan }: { plan: CloudSubscriptionSnapshot["window_subscription"] }) {
+  const windows = [
+    { label: t("settings.billing.fiveHour"), usage: plan.five_hour },
+    { label: t("settings.billing.weekly"), usage: plan.weekly },
+  ];
+  return (
+    <>
+      <div className="settings-billing-windows">
+        {windows.map(({ label, usage }) => (
+          <div key={label} className={`settings-billing-window${usage?.exhausted ? " is-exhausted" : ""}`}>
+            <div>
+              <h3>{label}</h3>
+              {usage ? <strong>{billingPercent.format(usage.used_percent / 100)}</strong> : null}
+            </div>
+            {usage ? <Progress value={usage.used_percent / 100} label={label} /> : null}
+            <span>{usage?.resets_at
+              ? t("settings.billing.resetsAt", { date: billingDate.format(usage.resets_at * 1_000) })
+              : usage ? t("settings.billing.windowIdle") : t("settings.billing.unavailable")}</span>
+          </div>
+        ))}
+      </div>
+      <div className="settings-billing-models">
+        <h3>{t("settings.billing.modelMultipliers")}</h3>
+        {plan.models.length ? (
+          <dl>
+            {plan.models.map(({ id, multiplier }) => (
+              <div key={id}><dt>{id}</dt><dd>×{multiplier}</dd></div>
+            ))}
+          </dl>
+        ) : <span>{t("settings.billing.unavailable")}</span>}
+      </div>
+    </>
+  );
 }
 
 // ---------- about ----------
