@@ -11,6 +11,12 @@ export class CloudModelsClient implements Model3DGenerator {
   private snapshot?: CloudQuotaSnapshot;
   private subscriptionSnapshot?: { token: string; value: CloudSubscriptionSnapshot; until: number };
   private subscriptionPending?: { token: string; request: Promise<CloudSubscriptionSnapshot | null> };
+  private subscriptionCatalogRetryAt = 0;
+  private chatCredential?: {
+    token: string;
+    until: number;
+    request: Promise<{ baseUrl: string; apiKey: string }>;
+  };
   private error?: string;
   private fetchedAt = 0;
   private quotaRevision = 0;
@@ -36,6 +42,8 @@ export class CloudModelsClient implements Model3DGenerator {
     this.snapshot = undefined;
     this.subscriptionSnapshot = undefined;
     this.subscriptionPending = undefined;
+    this.subscriptionCatalogRetryAt = 0;
+    this.chatCredential = undefined;
     this.error = undefined;
     if (input) await this.refresh(true);
   }
@@ -68,6 +76,22 @@ export class CloudModelsClient implements Model3DGenerator {
     try { await pending; } finally { if (this.refreshPending === pending) this.refreshPending = undefined; }
   }
   async quotas(): Promise<CloudQuotaSnapshot | null> { await this.refresh(true); return this.snapshot ?? null; }
+  subscriptionCatalog() {
+    const session = this.session;
+    if (!session) return { loading: false };
+    const now = Date.now();
+    const cached = this.subscriptionSnapshot?.token === session.token ? this.subscriptionSnapshot : undefined;
+    const expires = cached?.value.window_subscription.expires_at;
+    const snapshot = expires && expires * 1_000 <= now ? undefined : cached?.value;
+    if (cached && cached.until > now) return { snapshot, loading: false };
+    if (this.subscriptionPending?.token === session.token) return { snapshot, loading: true };
+    if (this.subscriptionCatalogRetryAt > now) return { snapshot, loading: false };
+    const token = session.token;
+    void this.subscription().catch(() => {
+      if (this.session === session && session.token === token) this.subscriptionCatalogRetryAt = Date.now() + 10_000;
+    });
+    return { snapshot, loading: true };
+  }
   async subscription(force = false, userId?: string): Promise<CloudSubscriptionSnapshot | null> {
     const session = this.session;
     if (!session || (userId !== undefined && session.userId !== userId)) return null;
@@ -88,6 +112,7 @@ export class CloudModelsClient implements Model3DGenerator {
         .filter((time): time is number => typeof time === "number" && time > 0)
         .map((time) => time * 1_000));
       this.subscriptionSnapshot = { token, value: data, until };
+      this.subscriptionCatalogRetryAt = 0;
       return data;
     })();
     this.subscriptionPending = { token, request };
@@ -96,6 +121,41 @@ export class CloudModelsClient implements Model3DGenerator {
     } finally {
       if (this.subscriptionPending?.request === request) this.subscriptionPending = undefined;
     }
+  }
+  async subscriptionRelay(model: string, signal?: AbortSignal) {
+    const session = this.session;
+    if (!session) throw new Error("Sign in to use subscription models.");
+    const subscription = (await this.subscription(false, session.userId))?.window_subscription;
+    if (this.session !== session || !subscription?.active || !subscription.models.some(({ id }) => id === model)) {
+      throw new Error("This model is not available with the current subscription.");
+    }
+    const token = session.token;
+    let credential = this.chatCredential;
+    if (credential?.token !== token || credential.until <= Date.now()) {
+      const request = this.json<{ data: { base_url: string; api_key: string } }>("/api/credential", session, {
+        method: "POST",
+        signal: AbortSignal.timeout(15_000),
+      }).then(({ data }) => {
+        const url = new URL(data.base_url);
+        const local = ["localhost", "127.0.0.1", "[::1]"];
+        const localRelay = url.protocol === "http:" && local.includes(url.hostname) && local.includes(new URL(this.apiUrl).hostname);
+        if ((!localRelay && url.protocol !== "https:") || url.username || url.password || url.search || url.hash || !data.api_key) {
+          throw new Error("Cloud returned an invalid model relay credential.");
+        }
+        return { baseUrl: url.href.replace(/\/$/, ""), apiKey: data.api_key };
+      }).catch((cause) => {
+        if (this.chatCredential?.request === request) this.chatCredential = undefined;
+        throw cause;
+      });
+      credential = { token, request, until: Date.now() + 60_000 };
+      this.chatCredential = credential;
+    }
+    const result = await credential.request;
+    const combined = signal ? AbortSignal.any([signal, session.controller.signal]) : session.controller.signal;
+    combined.throwIfAborted();
+    return { ...result, signal: combined, finished: () => {
+      if (this.session === session) this.subscriptionSnapshot = undefined;
+    } };
   }
   hasProvider(providerId: string): boolean { return this.metadata.providers.some((provider) => provider.id === providerId); }
   /**

@@ -3,7 +3,7 @@ import { createSupabaseClient } from "./auth-client.js";
 export { createSupabaseClient } from "./auth-client.js";
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { SignInDialog, type SignInProvider } from "./sign-in-dialog.js";
-import { syncCloudSession } from "./api.js";
+import { notifyAgentModelsChanged, syncCloudSession } from "./api.js";
 import { useReadyRuntimeGeneration } from "./runtime-connection.js";
 import { isLocalDebugEnabled, isLoopbackHostname, LOCAL_DEBUG_ACCESS_TOKEN, LOCAL_DEBUG_USER } from "../shared/local-debug.js";
 import { t } from "./i18n.js";
@@ -61,11 +61,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const pendingAccessToken = useRef<((token: string | undefined) => void) | undefined>(undefined);
   const cloudSync = useRef(Promise.resolve());
   const cloudSyncRevision = useRef(0);
+  const cloudUserId = useRef<string | undefined>(undefined);
   function synchronizeCloud(session: { access_token: string; user: User } | null): void {
     const revision = ++cloudSyncRevision.current;
     cloudSync.current = cloudSync.current.catch(() => {}).then(async () => {
       if (revision !== cloudSyncRevision.current) return;
       await syncCloudSession(session ? { accessToken: session.access_token, userId: session.user.id } : null);
+      if (revision === cloudSyncRevision.current && cloudUserId.current !== session?.user.id) {
+        cloudUserId.current = session?.user.id;
+        notifyAgentModelsChanged();
+      }
     }).catch(() => { /* Login remains available if the local daemon is restarting. */ });
   }
 

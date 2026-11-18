@@ -8,6 +8,7 @@ import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createApp } from "../src/daemon/app.js";
 import { CloudModelsClient } from "../src/daemon/cloud-models.js";
+import { SUBSCRIPTION_PROVIDER, syncSubscriptionProvider } from "../src/daemon/subscription-chat.js";
 import { BUILTIN_CLOUD_CATALOG, HYPER3D_CONNECTION_ID, HYPER3D_DEFAULT_TIER, type CloudQuotaSnapshot } from "../src/shared/cloud-models.js";
 import { accountCloudState, canAffordCloudModel, cloudQuotaSummary, quotaResetTime, CloudQuotaDetails, CloudQuotaStatus } from "../src/renderer/cloud-quota.js";
 import { ToolRunner } from "../src/daemon/tools.js";
@@ -228,6 +229,82 @@ describe("desktop free cloud connection", () => {
     await client.setSession({ accessToken: "wrong-token", userId: "forged-user" });
     expect(client.connection(MODEL.provider).availability).toBe("sign_in_required");
     expect((await client.catalog()).models).toEqual([]);
+  });
+  it("returns the conversation catalog while the subscription service is still pending", async () => {
+    const base = remote();
+    let finish!: (result: Response) => void;
+    const pending = new Promise<Response>((resolve) => { finish = resolve; });
+    const { request } = await fixture(vi.fn(async (url, init) =>
+      String(url).endsWith("/api/billing/subscription") ? pending : base(url, init)));
+    await request("/cloud/session", "PUT", { accessToken: "account-token-1", userId: "user-1" });
+    const catalog = await request("/models?runtimes=1");
+    expect(catalog.json().loadingProviders).toContain(SUBSCRIPTION_PROVIDER);
+    finish(Response.json({ data: { window_subscription: { active: true, models: [{ id: "chat-model", multiplier: "2" }] } } }));
+    await vi.waitFor(async () => {
+      const ready = await request("/models?runtimes=1");
+      expect(ready.json().models).toContainEqual(expect.objectContaining({ provider: SUBSCRIPTION_PROVIDER, id: "chat-model" }));
+    });
+  });
+  it("uses managed chat credentials only for subscribed models and cancels them on logout", async () => {
+    const base = remote();
+    const request = vi.fn<typeof fetch>(async (url, init) => {
+      if (String(url).endsWith("/api/billing/subscription")) {
+        return Response.json({ data: { window_subscription: { active: true, models: [{ id: "chat-model", multiplier: "2" }] } } });
+      }
+      if (String(url).endsWith("/api/credential")) {
+        expect(init?.method).toBe("POST");
+        expect(new Headers(init?.headers).get("authorization")).toBe("Bearer account-token-1");
+        return Response.json({ data: { base_url: "https://relay.example/v1", api_key: "managed-relay-credential" } });
+      }
+      return base(url, init);
+    });
+    const client = new CloudModelsClient("https://cloud.example", request);
+    await client.setSession({ accessToken: "account-token-1", userId: "user-1" });
+    await expect(client.subscriptionRelay("other-model")).rejects.toThrow("not available");
+    expect(request.mock.calls.filter(([url]) => String(url).endsWith("/api/credential"))).toHaveLength(0);
+    const [relay, sameAccount] = await Promise.all([client.subscriptionRelay("chat-model"), client.subscriptionRelay("chat-model")]);
+    expect(relay).toMatchObject({ baseUrl: "https://relay.example/v1", apiKey: "managed-relay-credential" });
+    expect(sameAccount.apiKey).toBe(relay.apiKey);
+    expect(request.mock.calls.filter(([url]) => String(url).endsWith("/api/credential"))).toHaveLength(1);
+    await client.setSession(null);
+    expect(relay.signal.aborted).toBe(true);
+    await expect(client.subscriptionRelay("chat-model")).rejects.toThrow("Sign in");
+  });
+  it("dispatches subscription chat through the managed relay and reports the exhausted window", async () => {
+    const base = remote();
+    const cloud = new CloudModelsClient("https://cloud.example", async (url, init) => {
+      if (String(url).endsWith("/api/billing/subscription")) {
+        return Response.json({ data: { window_subscription: { active: true, models: [
+          { id: "chat-model", multiplier: "2", context_window: 32_768, max_output_tokens: 4_096 },
+        ] } } });
+      }
+      if (String(url).endsWith("/api/credential")) {
+        return Response.json({ data: { base_url: "https://relay.example/v1", api_key: "managed-relay-credential" } });
+      }
+      return base(url, init);
+    });
+    const directory = await mkdtemp(path.join(tmpdir(), "ohmygame-subscription-chat-"));
+    directories.push(directory);
+    const runtime = await ModelRuntime.create({ authPath: path.join(directory, "auth.json"), modelsPath: null, refreshOnCreate: false });
+    await cloud.setSession({ accessToken: "account-token-1", userId: "user-1" });
+    await syncSubscriptionProvider(runtime, cloud);
+    const model = runtime.getModel(SUBSCRIPTION_PROVIDER, "chat-model")!;
+    expect(model).toMatchObject({ name: "chat-model · ×2", contextWindow: 32_768, maxTokens: 4_096 });
+    const fetchRelay = vi.fn<typeof fetch>(async (url, init) => {
+      const outgoing = new Request(url, init);
+      expect(outgoing.url).toBe("https://relay.example/v1/chat/completions");
+      expect(outgoing.headers.get("authorization")).toBe("Bearer managed-relay-credential");
+      expect(outgoing.redirect).toBe("error");
+      return Response.json({ error: { message: "limit reached" } }, {
+        status: 429, headers: { "x-subscription-limit": "weekly", "retry-after": "120" },
+      });
+    });
+    const result = await runtime.streamSimple(model, { messages: [{ role: "user", content: "Hello", timestamp: 1 }] }, { fetch: fetchRelay }).result();
+    expect(result).toMatchObject({ stopReason: "error", errorMessage: "Subscription weekly limit reached. Resets in 2 min." });
+    expect(fetchRelay).toHaveBeenCalledTimes(1);
+    await cloud.setSession(null);
+    await syncSubscriptionProvider(runtime, cloud);
+    expect(runtime.getModel(SUBSCRIPTION_PROVIDER, "chat-model")).toBeUndefined();
   });
   it("uses only the account token and retries a lost create response with the same idempotency key", async () => {
     let first = true;

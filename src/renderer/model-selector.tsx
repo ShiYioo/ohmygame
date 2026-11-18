@@ -277,12 +277,15 @@ export function useAgentModels(options: { agentRuntimes?: boolean; accountProfil
       });
     };
     const reload = () => { retries = 0; load(); };
+    const refreshOnFocus = () => { retries = 0; load(true); };
     reload();
     window.addEventListener(MODELS_CHANGED_EVENT, reload);
+    if (agentRuntimes) window.addEventListener("focus", refreshOnFocus);
     return () => {
       disposed = true;
       clearTimeout(retry);
       window.removeEventListener(MODELS_CHANGED_EVENT, reload);
+      window.removeEventListener("focus", refreshOnFocus);
     };
   }, [agentRuntimes, profileKey]);
   return catalog;

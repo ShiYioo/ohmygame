@@ -1,10 +1,8 @@
-import { Bell, Cpu, Globe2, InfoCircle, Key, Palette as PaletteIcon, Plug, Routing, Server, SettingsMinimal, User } from "./icons.js";
+import { Bell, Cpu, FileDocument, Globe2, InfoCircle, Key, Palette as PaletteIcon, Plug, Routing, Server, SettingsMinimal, User } from "./icons.js";
 import type { SettingsSection } from "./routes.js";
 import { t } from "./i18n.js";
 
-// Sections in groups, as in the lab: the app itself, AI, what other tools
-// connect through, then the account. Billing stays hidden until it ships;
-// its page still answers its link.
+// Sections in groups for the app, AI, connections, and account.
 export const SETTINGS_NAV: Array<{ heading?: string; items: Array<{ section: SettingsSection; label: string; icon: typeof SettingsMinimal }> }> = [
   { items: [
     { section: "general", label: t("settings.nav.general"), icon: SettingsMinimal },
@@ -24,6 +22,7 @@ export const SETTINGS_NAV: Array<{ heading?: string; items: Array<{ section: Set
   ] },
   { heading: t("settings.nav.accountGroup"), items: [
     { section: "account", label: t("settings.nav.account"), icon: User },
+    { section: "billing", label: t("settings.nav.billing"), icon: FileDocument },
     { section: "about", label: t("settings.nav.about"), icon: InfoCircle },
   ] },
 ];

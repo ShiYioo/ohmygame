@@ -58,9 +58,7 @@ export function SettingsPage({ section, agent, onSectionChange, onNavigate, onOp
     onSectionChange(next);
   }
 
-  // Billing is hidden from the list but still answers its link.
-  const current = NAV.flatMap((group) => group.items).find((item) => item.section === section)
-    ?? (section === "billing" ? { label: t("settings.nav.billing") } : undefined);
+  const current = NAV.flatMap((group) => group.items).find((item) => item.section === section);
   // An agent's own page draws its own head.
   const inDetail = section === "agents" && Boolean(agent);
   return (

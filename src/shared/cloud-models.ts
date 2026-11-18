@@ -56,7 +56,7 @@ export interface CloudSubscriptionSnapshot {
     expires_at?: number;
     five_hour?: { used_percent: number; resets_at: number; exhausted: boolean };
     weekly?: { used_percent: number; resets_at: number; exhausted: boolean };
-    models: Array<{ id: string; multiplier: string }>;
+    models: Array<{ id: string; multiplier: string; context_window?: number; max_output_tokens?: number }>;
   };
 }
 export interface CloudConnectionState { availability: CloudAvailability; userId?: string; quota?: CloudQuota; message?: string }

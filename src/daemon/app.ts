@@ -112,6 +112,7 @@ import { customModelCatalog } from "./custom-model-capabilities.js";
 import { CUSTOM_IMAGE_MODEL_APIS, MEDIA_MODEL_USAGES, MODEL_3D_MIN_POLYCOUNT } from "../shared/contracts.js";
 import { Model3DGenerationError, type Model3DGenerator } from "./model3d.js";
 import { CloudModelsClient } from "./cloud-models.js";
+import { SUBSCRIPTION_PROVIDER, registerSubscriptionProvider, syncSubscriptionProvider } from "./subscription-chat.js";
 import { MAX_ANIMATION_ACTIONS, MODEL_3D_MAX_POLYCOUNT } from "../shared/generation-config.js";
 import { MeshyProvider } from "./meshy-provider.js";
 import { MediaProviderKeyStore } from "./media-provider-settings.js";
@@ -827,6 +828,7 @@ export function createApp(options: AppOptions = {}) {
   const availableModel = async (provider: string, id: string) => {
     if (!providerEnabled(provider)) return undefined;
     const runtime = await getModelRuntime();
+    if (provider === SUBSCRIPTION_PROVIDER) await syncSubscriptionProvider(runtime, cloudModels);
     return resolveModel(runtime, (await runtime.getAvailable(provider)).find((model) => model.id === id));
   };
   const publishConversationRenamed = (conversation: StoredConversation["summary"]) => {
@@ -841,7 +843,7 @@ export function createApp(options: AppOptions = {}) {
     events.publish(project.id, "project.renamed", { project: { ...project } });
   };
   const projectNaming = new ProjectNaming(projects, options.generateProjectName ?? (async (prompt, model, signal) => {
-    if (!model) return undefined;
+    if (!model || model.provider === SUBSCRIPTION_PROVIDER) return undefined;
     const selected = await availableModel(model.provider, model.id);
     if (!selected || signal.aborted) return undefined;
     const runtime = await getModelRuntime();
@@ -1326,6 +1328,7 @@ export function createApp(options: AppOptions = {}) {
       if (isAgentRuntimeId(selected.provider)) return createNativeSession(project, conversation, selected.provider, selected.id);
       const modelRuntime = await getModelRuntime();
       if (!providerEnabled(selected.provider)) throw new Error(`Provider ${selected.provider} is disabled. Enable it in Settings to continue.`);
+      if (selected.provider === SUBSCRIPTION_PROVIDER) await syncSubscriptionProvider(modelRuntime, cloudModels);
       const model = resolveModel(modelRuntime, modelRuntime.getModel(selected.provider, selected.id));
       if (!model || !modelRuntime.hasConfiguredAuth(selected.provider)) {
         throw new Error(`The selected model ${selected.provider}/${selected.id} is not available`);
@@ -3955,8 +3958,12 @@ export function createApp(options: AppOptions = {}) {
     if (!isAccountProfileIds(profiles)) return reply.code(400).send({ error: "Invalid account profile selections" });
     for (const runtime of ACCOUNT_RUNTIME_IDS) if (profiles[runtime]) profiles[runtime] = agentRuntimes.settings.resolveProfileId(runtime, profiles[runtime]);
     const runtime = await getModelRuntime();
+    const subscription = request.query.runtimes === "1" ? cloudModels.subscriptionCatalog() : undefined;
+    if (subscription) registerSubscriptionProvider(runtime, cloudModels, subscription.snapshot);
     const loadingProviders = catalogRefresh.schedule(runtime);
-    const available = resolveModels(runtime, (await runtime.getAvailable()).filter((model) => providerEnabled(model.provider)));
+    if (subscription?.loading) loadingProviders.push(SUBSCRIPTION_PROVIDER);
+    const available = resolveModels(runtime, (await runtime.getAvailable()).filter((model) =>
+      providerEnabled(model.provider) && (model.provider !== SUBSCRIPTION_PROVIDER || request.query.runtimes === "1")));
     const models = available.filter((model) => providerModelSettings.isVisible(model));
     const hidden = available.filter((model) => !providerModelSettings.isVisible(model));
     const defaultModel = findAgentModel(models, configuredDefaultModel(dataDirectory, piAgentDirectory));
@@ -4305,6 +4312,8 @@ export function createApp(options: AppOptions = {}) {
   // the saved default, Pi's preferred model, then the first coding agent's.
   async function defaultPiModel(): Promise<RuntimeModel | undefined> {
     const runtime = await getModelRuntime();
+    const subscription = cloudModels.subscriptionCatalog();
+    registerSubscriptionProvider(runtime, cloudModels, subscription.snapshot);
     return preferredAgentModel(
       resolveModels(runtime, (await runtime.getAvailable()).filter((model) => providerEnabled(model.provider) && providerModelSettings.isVisible(model))),
       undefined,
