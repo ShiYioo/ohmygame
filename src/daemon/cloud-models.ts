@@ -9,6 +9,7 @@ export class CloudModelsClient implements Model3DGenerator {
   private session?: { token: string; userId: string; controller: AbortController };
   private metadata: CloudCatalog = BUILTIN_CLOUD_CATALOG;
   private snapshot?: CloudQuotaSnapshot;
+  private subscriptionSnapshot?: CloudSubscriptionSnapshot;
   private error?: string;
   private fetchedAt = 0;
   private quotaRevision = 0;
@@ -32,6 +33,7 @@ export class CloudModelsClient implements Model3DGenerator {
     this.session = input ? { token: input.accessToken, userId: input.userId, controller: new AbortController() } : undefined;
     this.refreshPending = undefined;
     this.snapshot = undefined;
+    this.subscriptionSnapshot = undefined;
     this.error = undefined;
     if (input) await this.refresh(true);
   }
@@ -44,13 +46,16 @@ export class CloudModelsClient implements Model3DGenerator {
       const token = session.token;
       const revision = this.quotaRevision;
       try {
-        const [metadata, snapshot] = await Promise.all([
-          this.json<CloudCatalog>("/v1/cloud/catalog", session), this.json<CloudQuotaSnapshot>("/v1/me/quotas", session),
+        const [metadata, snapshot, subscription] = await Promise.all([
+          this.json<CloudCatalog>("/v1/cloud/catalog", session),
+          this.json<CloudQuotaSnapshot>("/v1/me/quotas", session),
+          this.json<CloudSubscriptionSnapshot>("/api/billing/subscription", session).catch(() => undefined),
         ]);
         if (this.session !== session || session.token !== token || this.quotaRevision !== revision) return;
         if (snapshot.userId !== session.userId || !Array.isArray(snapshot.quotas) || !Array.isArray(metadata.providers) || !Array.isArray(metadata.models)) throw new Model3DGenerationError("Could not verify the cloud account", 401);
         this.metadata = metadata;
         this.snapshot = snapshot;
+        if (subscription) this.subscriptionSnapshot = subscription;
         this.fetchedAt = Date.now();
         this.error = undefined;
       } catch (cause) {
@@ -66,7 +71,8 @@ export class CloudModelsClient implements Model3DGenerator {
   async subscription(): Promise<CloudSubscriptionSnapshot | null> {
     const session = this.session;
     if (!session) return null;
-    return this.json<CloudSubscriptionSnapshot>("/api/billing/subscription", session);
+    await this.refresh(true);
+    return this.subscriptionSnapshot ?? null;
   }
   hasProvider(providerId: string): boolean { return this.metadata.providers.some((provider) => provider.id === providerId); }
   /**
