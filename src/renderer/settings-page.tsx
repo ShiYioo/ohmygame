@@ -412,20 +412,32 @@ function AccountIdentity() {
 }
 
 function BillingSettings() {
+  const auth = useAuth();
   const link = useExternalLink();
+  const userId = auth.state.status === "signed-in" ? auth.state.user.id : undefined;
+  return <BillingSubscription key={userId} userId={userId} link={link} />;
+}
+
+function BillingSubscription({ userId, link }: { userId?: string; link: ReturnType<typeof useExternalLink> }) {
   const [subscription, setSubscription] = useState<CloudSubscriptionSnapshot | null>();
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(Boolean(userId));
+  const [failed, setFailed] = useState(false);
+  const [refresh, setRefresh] = useState(0);
   useEffect(() => {
+    if (!userId) return;
     let active = true;
     setLoading(true);
-    void getCloudSubscription().then((value) => { if (active) setSubscription(value); }, () => { if (active) setSubscription(null); })
+    setFailed(false);
+    void getCloudSubscription(userId, refresh > 0).then((value) => { if (active) setSubscription(value); }, () => { if (active) setFailed(true); })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
-  }, []);
+  }, [userId, refresh]);
   return (
     <>
       <SettingsGroup>
-        <CloudSubscriptionCard subscription={subscription} loading={loading} />
+        {failed ? <SettingsNote tone="danger">{t("settings.billing.unavailable")}</SettingsNote> :
+          <CloudSubscriptionCard subscription={subscription} loading={loading} />}
+        {userId ? <Button size="sm" disabled={loading} onClick={() => setRefresh((value) => value + 1)}>{t("common.refresh")}</Button> : null}
       </SettingsGroup>
       <SettingsGroup>
       <SettingsRow title={t("settings.billing.title")} description={t("settings.billing.description")}>

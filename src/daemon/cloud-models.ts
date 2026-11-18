@@ -9,7 +9,8 @@ export class CloudModelsClient implements Model3DGenerator {
   private session?: { token: string; userId: string; controller: AbortController };
   private metadata: CloudCatalog = BUILTIN_CLOUD_CATALOG;
   private snapshot?: CloudQuotaSnapshot;
-  private subscriptionSnapshot?: CloudSubscriptionSnapshot;
+  private subscriptionSnapshot?: { token: string; value: CloudSubscriptionSnapshot; until: number };
+  private subscriptionPending?: { token: string; request: Promise<CloudSubscriptionSnapshot | null> };
   private error?: string;
   private fetchedAt = 0;
   private quotaRevision = 0;
@@ -34,6 +35,7 @@ export class CloudModelsClient implements Model3DGenerator {
     this.refreshPending = undefined;
     this.snapshot = undefined;
     this.subscriptionSnapshot = undefined;
+    this.subscriptionPending = undefined;
     this.error = undefined;
     if (input) await this.refresh(true);
   }
@@ -46,33 +48,54 @@ export class CloudModelsClient implements Model3DGenerator {
       const token = session.token;
       const revision = this.quotaRevision;
       try {
-        const [metadata, snapshot, subscription] = await Promise.all([
+        const [metadata, snapshot] = await Promise.all([
           this.json<CloudCatalog>("/v1/cloud/catalog", session),
           this.json<CloudQuotaSnapshot>("/v1/me/quotas", session),
-          this.json<CloudSubscriptionSnapshot>("/api/billing/subscription", session).catch(() => undefined),
         ]);
         if (this.session !== session || session.token !== token || this.quotaRevision !== revision) return;
         if (snapshot.userId !== session.userId || !Array.isArray(snapshot.quotas) || !Array.isArray(metadata.providers) || !Array.isArray(metadata.models)) throw new Model3DGenerationError("Could not verify the cloud account", 401);
         this.metadata = metadata;
         this.snapshot = snapshot;
-        if (subscription) this.subscriptionSnapshot = subscription;
         this.fetchedAt = Date.now();
         this.error = undefined;
       } catch (cause) {
         if (this.session !== session || session.token !== token || this.quotaRevision !== revision) return;
         this.error = cause instanceof Model3DGenerationError ? cause.message : "Free cloud models are temporarily unavailable";
-        if (cause instanceof Model3DGenerationError && cause.statusCode === 401) { session.controller.abort(); this.session = undefined; this.snapshot = undefined; }
+        if (cause instanceof Model3DGenerationError && cause.statusCode === 401) { await this.setSession(null); }
       }
     })();
     this.refreshPending = pending;
     try { await pending; } finally { if (this.refreshPending === pending) this.refreshPending = undefined; }
   }
   async quotas(): Promise<CloudQuotaSnapshot | null> { await this.refresh(true); return this.snapshot ?? null; }
-  async subscription(): Promise<CloudSubscriptionSnapshot | null> {
+  async subscription(force = false, userId?: string): Promise<CloudSubscriptionSnapshot | null> {
     const session = this.session;
-    if (!session) return null;
-    await this.refresh(true);
-    return this.subscriptionSnapshot ?? null;
+    if (!session || (userId !== undefined && session.userId !== userId)) return null;
+    const token = session.token;
+    if (this.subscriptionPending?.token === token) return this.subscriptionPending.request;
+    const cached = this.subscriptionSnapshot;
+    if (!force && cached?.token === token && Date.now() < cached.until) return cached.value;
+    const request = (async () => {
+      const { data } = await this.json<{ data: CloudSubscriptionSnapshot }>("/api/billing/subscription", session, {
+        signal: AbortSignal.timeout(15_000),
+      });
+      if (this.session !== session || session.token !== token) return null;
+      if (!Array.isArray(data?.window_subscription?.models)) {
+        throw new Model3DGenerationError("Invalid Cloud subscription response", 502);
+      }
+      const { expires_at, five_hour, weekly } = data.window_subscription;
+      const until = Math.min(Date.now() + 10_000, ...[expires_at, five_hour?.resets_at, weekly?.resets_at]
+        .filter((time): time is number => typeof time === "number" && time > 0)
+        .map((time) => time * 1_000));
+      this.subscriptionSnapshot = { token, value: data, until };
+      return data;
+    })();
+    this.subscriptionPending = { token, request };
+    try {
+      return await request;
+    } finally {
+      if (this.subscriptionPending?.request === request) this.subscriptionPending = undefined;
+    }
   }
   hasProvider(providerId: string): boolean { return this.metadata.providers.some((provider) => provider.id === providerId); }
   /**

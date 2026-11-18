@@ -117,6 +117,28 @@ describe("desktop free cloud connection", () => {
     await client.quotas();
     expect(request).toHaveBeenCalledTimes(4);
   });
+  it("loads subscription independently, joins concurrent reads and refreshes on demand", async () => {
+    const base = remote();
+    const subscription = vi.fn(async () => Response.json({
+      data: { window_subscription: { active: true, plan_title: "Plus", models: [] } },
+    }));
+    const client = new CloudModelsClient("https://cloud.example", (url, init) =>
+      String(url).endsWith("/api/billing/subscription") ? subscription() : base(url, init));
+    await client.setSession({ accessToken: "account-token-1", userId: "user-1" });
+    expect(subscription).not.toHaveBeenCalled();
+    const snapshots = await Promise.all([client.subscription(), client.subscription()]);
+    expect(snapshots).toEqual(Array(2).fill({ window_subscription: { active: true, plan_title: "Plus", models: [] } }));
+    await client.subscription();
+    expect(subscription).toHaveBeenCalledTimes(1);
+    await client.subscription(true);
+    expect(subscription).toHaveBeenCalledTimes(2);
+    expect(base).toHaveBeenCalledTimes(2);
+    await client.setSession({ accessToken: "account-token-2", userId: "user-2" });
+    expect(await client.subscription(false, "user-1")).toBeNull();
+    await client.subscription(false, "user-2");
+    expect(subscription).toHaveBeenCalledTimes(3);
+  });
+
   it("serves the provider snapshot while cloud verification is still pending", async () => {
     const request = vi.fn<typeof fetch>(async (_url, init) => new Promise<Response>((resolve) => {
       init?.signal?.addEventListener("abort", () => resolve(Response.json({})), { once: true });
