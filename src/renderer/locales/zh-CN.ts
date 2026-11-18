@@ -255,6 +255,13 @@ const zhCN: typeof en = {
       title: "账单",
       description: "在网页上管理 OhMyGame Cloud 的套餐、用量和付款信息。",
       open: "打开账单页面",
+      membership: "会员等级",
+      expires: "到期时间",
+      fiveHour: "5 小时窗口",
+      weekly: "周窗口",
+      models: "模型",
+      unavailable: "不可用",
+      noPlan: "没有有效订阅",
     },
     appearance: {
       theme: "主题",

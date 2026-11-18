@@ -255,6 +255,13 @@ const en = {
       description:
         "Manage your OhMyGame Cloud plan, usage, and payment details on the web.",
       open: "Open billing dashboard",
+      membership: "Membership",
+      expires: "Expires",
+      fiveHour: "5-hour window",
+      weekly: "Weekly window",
+      models: "Models",
+      unavailable: "Unavailable",
+      noPlan: "No active subscription",
     },
     appearance: {
       theme: "Theme",

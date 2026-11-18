@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
-import { BUILTIN_CLOUD_CATALOG, type Cloud3DRequest, type CloudCatalog, type CloudConnectionState, type CloudGenerationJob, type CloudQuotaSnapshot } from "../shared/cloud-models.js";
+import { BUILTIN_CLOUD_CATALOG, type Cloud3DRequest, type CloudCatalog, type CloudConnectionState, type CloudGenerationJob, type CloudQuotaSnapshot, type CloudSubscriptionSnapshot } from "../shared/cloud-models.js";
 import type { MediaModelCatalog, Model3DModel, ProviderSummary } from "../shared/contracts.js";
 import { Model3DGenerationError, readModel3DResult, type Model3DGenerationInput, type Model3DGenerator } from "./model3d.js";
 
@@ -63,6 +63,11 @@ export class CloudModelsClient implements Model3DGenerator {
     try { await pending; } finally { if (this.refreshPending === pending) this.refreshPending = undefined; }
   }
   async quotas(): Promise<CloudQuotaSnapshot | null> { await this.refresh(true); return this.snapshot ?? null; }
+  async subscription(): Promise<CloudSubscriptionSnapshot | null> {
+    const session = this.session;
+    if (!session) return null;
+    return this.json<CloudSubscriptionSnapshot>("/api/billing/subscription", session);
+  }
   hasProvider(providerId: string): boolean { return this.metadata.providers.some((provider) => provider.id === providerId); }
   /**
    * Return the currently known provider state without starting or awaiting a

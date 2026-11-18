@@ -4181,6 +4181,7 @@ export function createApp(options: AppOptions = {}) {
     return reply.code(204).send();
   });
   app.get("/cloud/quotas", async () => cloudModels.quotas());
+  app.get("/cloud/subscription", async () => cloudModels.subscription());
   app.get("/cloud/jobs", async (_request, reply) => {
     try { return await cloudModels.jobs(); }
     catch (cause) { if (cause instanceof Model3DGenerationError) return reply.code(cause.statusCode).send({ error: cause.message }); throw cause; }

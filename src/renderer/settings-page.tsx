@@ -23,7 +23,8 @@ import { ExternalAgentsSettings } from "./external-agents-settings.js";
 import { readNotificationSettings, setNotificationSettings, useNotificationPermission, type NotificationSettings as NotificationPreferences } from "./agent-notifications.js";
 import { readLanguagePreference, setLanguagePreference, t, type LanguagePreference } from "./i18n.js";
 import { ChangelogPanel } from "./changelog-panel.js";
-import { exportDiagnostics, getProjectLocation, listPluginThemes, setProjectLocation } from "./api.js";
+import { exportDiagnostics, getCloudSubscription, getProjectLocation, listPluginThemes, setProjectLocation } from "./api.js";
+import type { CloudSubscriptionSnapshot } from "../shared/cloud-models.js";
 import { readGeneralPreferences, setGeneralPreference, type GeneralPreferences } from "./general-preferences.js";
 import { Badge, Button, Disclosure, Progress, SegmentedControl, Select, Spinner, Switch, Tooltip } from "./ui/index.js";
 import { SettingsGroup, SettingsNote, SettingsRow } from "./settings-parts.js";
@@ -412,14 +413,47 @@ function AccountIdentity() {
 
 function BillingSettings() {
   const link = useExternalLink();
+  const [subscription, setSubscription] = useState<CloudSubscriptionSnapshot | null>();
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    let active = true;
+    setLoading(true);
+    void getCloudSubscription().then((value) => { if (active) setSubscription(value); }, () => { if (active) setSubscription(null); })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, []);
   return (
-    <SettingsGroup>
+    <>
+      <SettingsGroup>
+        <CloudSubscriptionCard subscription={subscription} loading={loading} />
+      </SettingsGroup>
+      <SettingsGroup>
       <SettingsRow title={t("settings.billing.title")} description={t("settings.billing.description")}>
         <Button icon={<ExternalLink size={14} />} onClick={() => void link.open(BILLING_DASHBOARD_URL)}>{t("settings.billing.open")}</Button>
       </SettingsRow>
       <ExternalLinkFallback url={link.failedUrl} />
-    </SettingsGroup>
+      </SettingsGroup>
+    </>
   );
+}
+
+function CloudSubscriptionCard({ subscription, loading }: { subscription?: CloudSubscriptionSnapshot | null; loading: boolean }) {
+  const windowSubscription = subscription?.window_subscription;
+  const formatDate = (seconds?: number) => seconds ? new Date(seconds * 1_000).toLocaleString() : t("settings.billing.unavailable");
+  const windowLine = (label: string, value?: { used_percent: number; resets_at: number; exhausted: boolean }) => value
+    ? `${label}: ${value.used_percent.toFixed(1)}% · ${value.exhausted ? t("settings.billing.unavailable") : formatDate(value.resets_at)}`
+    : `${label}: ${t("settings.billing.unavailable")}`;
+  return <div className="settings-billing-subscription">
+    <div className="settings-identity-text">
+      <strong>{loading ? t("common.loading") : windowSubscription?.plan_title ?? t("settings.billing.noPlan")}</strong>
+      <span>{t("settings.billing.membership")} · {t("settings.billing.expires")} {formatDate(windowSubscription?.expires_at)}</span>
+    </div>
+    <div className="settings-billing-windows">
+      <span>{windowLine(t("settings.billing.fiveHour"), windowSubscription?.five_hour)}</span>
+      <span>{windowLine(t("settings.billing.weekly"), windowSubscription?.weekly)}</span>
+      <span>{t("settings.billing.models")}: {windowSubscription?.models.map((model) => `${model.id} ×${model.multiplier}`).join(", ") || t("settings.billing.unavailable")}</span>
+    </div>
+  </div>;
 }
 
 // ---------- about ----------

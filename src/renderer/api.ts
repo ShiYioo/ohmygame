@@ -481,6 +481,7 @@ export async function syncCloudSession(session: { accessToken: string; userId: s
   notifyAgentModelsChanged();
 }
 export async function getCloudQuotas(): Promise<import("../shared/cloud-models.js").CloudQuotaSnapshot | null> { return request("/cloud/quotas"); }
+export async function getCloudSubscription(): Promise<import("../shared/cloud-models.js").CloudSubscriptionSnapshot | null> { return request("/cloud/subscription"); }
 
 export async function listProviders(): Promise<ProviderSummary[]> {
   return request(`/settings/providers?locale=${encodeURIComponent(language)}`);

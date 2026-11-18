@@ -43,6 +43,22 @@ export interface CloudQuota {
   personal: QuotaBalance;
 }
 export interface CloudQuotaSnapshot { userId: string; quotas: CloudQuota[]; fetchedAt: string }
+export interface CloudSubscriptionSnapshot {
+  wallet_credits: number;
+  used_wallet_credits: number;
+  account_status: "active" | "unavailable";
+  currency: string;
+  current: { plan_key: string; plan_name: string; status: string; renews_at?: string; cancel_at_period_end: boolean } | null;
+  window_subscription: {
+    active: boolean;
+    billing_mode: "subscription";
+    plan_title?: string;
+    expires_at?: number;
+    five_hour?: { used_percent: number; resets_at: number; exhausted: boolean };
+    weekly?: { used_percent: number; resets_at: number; exhausted: boolean };
+    models: Array<{ id: string; multiplier: string }>;
+  };
+}
 export interface CloudConnectionState { availability: CloudAvailability; userId?: string; quota?: CloudQuota; message?: string }
 export type CloudJobStatus = "queued" | "running" | "succeeded" | "failed" | "submission_unknown";
 export interface CloudGenerationJob {

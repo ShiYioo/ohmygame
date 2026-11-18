@@ -1709,3 +1709,5 @@
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+.settings-billing-subscription { display: grid; gap: 10px; }
+.settings-billing-windows { display: grid; gap: 5px; color: var(--text-secondary); font-size: 12px; line-height: 1.45; }
