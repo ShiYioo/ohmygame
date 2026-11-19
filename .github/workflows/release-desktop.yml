@@ -33,7 +33,7 @@ jobs:
     needs: release-notes
     runs-on: windows-latest
     env:
-      DESKTOP_UPDATE_URL: ${{ vars.DESKTOP_UPDATE_URL }}
+      DESKTOP_UPDATE_URL: https://example.invalid/ohmygame-windows-ci
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -134,6 +134,7 @@ jobs:
             release/latest.yml
 
   macos:
+    if: ${{ false }}
     needs: release-notes
     runs-on: macos-15
     env:
